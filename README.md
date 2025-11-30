@@ -1,227 +1,227 @@
 # TISA: Time-series & Image Streaming Augmentor
 
-本仓库实现了一套面向时序数据和图像数据的通用增强与评估算法体系，以下简称 **TISA 算法**（Time-series & Image Streaming Augmentor）。TISA 旨在在工业、制造、传感网络等场景中，对多源异构数据进行统一建模与表示学习，通过系统化的数据增强、特征提取、训练策略与评估协议，提升模型在分类、回归、检测等任务上的鲁棒性与泛化能力。
+This repository implements a general augmentation and evaluation framework for time-series and image data, hereafter referred to as the **TISA algorithm** (Time-series & Image Streaming Augmentor). TISA is designed for unified modeling and representation learning of multi-source heterogeneous data in industrial, manufacturing, and sensor-network scenarios. Through systematic data augmentation, feature extraction, training strategies, and evaluation protocols, it enhances model robustness and generalization across classification, regression, and detection tasks.
 
 ---
 
-## 一、算法整体概念
+## 1. Overall Concept of the Algorithm ⚙️
 
-TISA 算法从「数据处理 → 模型训练 → 特征评估 → 结果可视化与应用」的完整流程出发，围绕以下几类文件与模块展开设计：
+The TISA algorithm is designed around the complete pipeline from "data processing → model training → feature evaluation → visualization and application", organized by the following files and modules:
 
-- 顶层训练与评估脚本（如 `train.py`、`test.py`、`single_data_test.py`、`test_sample.py` 等），用于快速启动实验流程。
-- 配置管理与运行脚本（`configs/`, `run/`, `utils/config.py` 等），实现参数化、可复现实验配置。
-- 特征评估与下游任务脚本（`eval/`、`run/eval/`、`ensemble_models.py`、`optimize_knn.py` 等），用于对特征质量进行多协议评估与组合。
-- 数据增强与可视化模块（`src/augmentation.py`, `batch_generate_heatmaps.py`, `src/visualize.py` 等），负责在时序与图像层面进行可解释分析与展示。
-- 工业应用向的示例数据与接口（`data/fault_diagnosis.npy`, `data/soft_sensor.npy`），覆盖故障诊断、软测量等典型任务场景。
+- Top-level training and evaluation scripts (e.g., `train.py`, `test.py`, `single_data_test.py`, `test_sample.py`) for quickly starting experiments.
+- Configuration management and running scripts (`configs/`, `run/`, `utils/config.py`) for parameterized, reproducible experiment setups.
+- Feature evaluation and downstream task scripts (`eval/`, `run/eval/`, `ensemble_models.py`, `optimize_knn.py`) for multi-protocol evaluation and combination of feature quality.
+- Data augmentation and visualization modules (`src/augmentation.py`, `batch_generate_heatmaps.py`, `src/visualize.py`) for interpretable analysis and visualization at both time-series and image levels.
+- Example datasets and interfaces for industrial applications (`data/fault_diagnosis.npy`, `data/soft_sensor.npy`), covering typical scenarios such as fault diagnosis and soft sensing.
 
-从文件与目录命名可见，TISA 同时面向一维时序信号与二维图像/伪图像表示：
+From the file and directory naming, it is clear that TISA targets both 1D time-series signals and 2D image / pseudo-image representations:
 
-- 时序维度：通过窗口切片、频域变换或时间-通道组合，将传感器序列映射为模型可处理的输入张量；
-- 图像维度：通过将时序片段重排、编码或直接使用图像数据，实现与视觉模型（如 Transformer-based backbone）兼容的输入形式。
-
----
-
-## 二、训练与自监督核心思路
-
-### 1. 训练入口
-
-仓库根目录以及 `run/train/` 下的脚本（如 `train.py`, `run/train/train.py`）构成了 TISA 的主要训练入口：
-
-- 通过命令行参数或配置文件指定数据路径、模型配置、优化器设置等；
-- 支持单一数据源（如单设备时序）和多数据源（如多工况、多传感器组合）的联合训练；
-- 针对时序和图像数据，采用统一的训练循环结构，方便扩展和迁移。
-
-### 2. 自监督与元架构
-
-在 `train/ssl_meta_arch.py` 中，TISA 引入了自监督学习元架构：
-
-- 将时序或图像数据通过多视角增强（如裁剪、掩蔽、扰动）得到多个视图；
-- 使用共享骨干网络提取特征，并通过对比、重构或预测任务构造训练信号；
-- 在没有大量标注的情况下，为后续下游任务生成具有判别性的通用特征表示。
-
-在 `configs/ssl_default_config.yaml` 和 `configs/train/` 下，可以为不同模型规模和训练策略定义配置文件，实现：
-
-- 批大小、学习率、训练轮数等基础超参数的统一管理；
-- 不同骨干网络结构、输入尺寸、投影头结构等设置的快速切换；
-- 针对时序/图像差异的特定增强与归一化策略配置。
+- Time-series dimension: window slicing, frequency-domain transforms, or time-channel combinations map sensor sequences into input tensors usable by models.
+- Image dimension: by rearranging, encoding time-series segments, or directly using image data, TISA produces inputs compatible with visual models (e.g., Transformer-based backbones).
 
 ---
 
-## 三、模型骨干与特征头
+## 2. Training and Self-supervised Core Ideas 🧠
 
-### 1. 骨干网络
+### 1. Training Entry Points
 
-`src/backbones.py` 以及 `eval/depth/models/backbones/`, `eval/segmentation/models/backbones/`, `segmentation_m2f/models/backbones/` 等目录指示本仓库支持多种基于 Transformer 的骨干结构：
+Scripts in the repository root and under `run/train/` (e.g., `train.py`, `run/train/train.py`) form the main training entry points for TISA:
 
-- 统一的 Backbone 构造接口（如 `eval/depth/models/builder.py`, `segmentation_m2f/models/builder.py`），根据配置动态构建模型；
-- 针对不同任务（深度估计、分割等）复用相同或相近的主干，以共享表征空间；
-- 为时序数据提供「类图像」视角，将时间步视作空间维度，从而利用成熟的视觉骨干架构。
+- Specify data paths, model configs, optimizer settings, etc. via command-line arguments or configuration files.
+- Support both single-source data (e.g., time-series from a single device) and multi-source data (e.g., multiple operating conditions or sensor combinations) for joint training.
+- Adopt a unified training loop for both time-series and image data to facilitate extension and migration.
 
-### 2. 任务头与解码模块
+### 2. Self-supervision and Meta-architecture
 
-在 `eval/depth/decode_heads/`, `eval/segmentation/decode_heads/`, `segmentation_m2f/models/decode_heads/` 等目录下，包含多种解码头与任务头：
+In `train/ssl_meta_arch.py`, TISA introduces a self-supervised learning meta-architecture:
 
-- 对于回归型任务（如深度估计、软测量），利用连续值预测头输出像素级或序列级标量；
-- 对于分割与检测任务，引入 Mask、边界框等结构化输出模块（如 `segmentation_m2f/core/anchor`, `segmentation_m2f/core/box`）；
-- 可在时序维度上类比像素维度，为每个时间步或时间片段分配标签或权重，实现时间-空间一体的预测结构。
+- Obtain multiple views of time-series or image data via multi-view augmentations (e.g., cropping, masking, perturbation).
+- Use a shared backbone network to extract features and construct training signals via contrastive, reconstruction, or prediction tasks.
+- Generate discriminative, general-purpose representations for downstream tasks without requiring large-scale annotations.
 
----
+In `configs/ssl_default_config.yaml` and `configs/train/`, you can define configuration files for different model scales and training strategies to achieve:
 
-## 四、评估协议与模型组合
-
-### 1. 基础评估脚本
-
-在 `eval/` 和 `run/eval/` 目录下，存在若干用于特征评估和下游训练的脚本：
-
-- `eval/knn.py`, `run/eval/knn.py`：基于 k-近邻的特征质量评估，适用于时序与图像特征；
-- `eval/linear.py`, `run/eval/linear.py`：线性层探测，用于衡量冻结特征的线性可分性；
-- `eval/log_regression.py`, `run/eval/log_regression.py`：逻辑回归评估二分类或多分类性能；
-- `eval/metrics.py`, `spot-diff-main/utils/metrics.py`：统一封装准确率、召回率、AUC 等常用度量。
-
-这些评估脚本可在：
-
-- 仅基于时序输入（如 `data/fault_diagnosis.npy` 中的传感器信号）提取的特征上运行；
-- 仅基于图像输入（如由时序转化得到的「图像化」特征图）提取的特征上运行；
-- 或在多模态特征融合后进行联合评估。
-
-### 2. 模型集成与超参优化
-
-- `ensemble_models.py`：对多个模型或多轮训练得到的预测结果进行加权或规则组合，提升稳定性与精度；
-- `optimize_knn.py`：通过搜索 k 值、距离度量等超参，优化基于特征空间的最近邻分类效果。
-
-对于时序任务，可在不同时间粒度、不同窗口长度下训练多套模型；对于图像任务，则可在不同输入尺寸、不同视角变换下训练多套模型，再通过上述脚本进行后处理与集成。
+- Unified management of basic hyperparameters such as batch size, learning rate, and number of epochs.
+- Fast switching between different backbone architectures, input sizes, and projection head structures.
+- Specialized augmentation and normalization strategies for time-series vs. image data.
 
 ---
 
-## 五、数据增强与可视化
+## 3. Model Backbones and Heads 🧩
 
-### 1. 时序与图像增强
+### 1. Backbone Networks
 
-`src/augmentation.py` 与 `src/idaly/augmentation.py`（从命名可推断为子模块增强逻辑）提供了多种形式的数据增强操作：
+`src/backbones.py` and directories such as `eval/depth/models/backbones/`, `eval/segmentation/models/backbones/`, and `segmentation_m2f/models/backbones/` indicate that the repository supports multiple Transformer-based backbone structures:
 
-- 对时序信号：随机裁剪、缩放、加噪、时间抖动、通道置换等；
-- 对图像或时序伪图像：裁剪、翻转、颜色变换、遮挡掩蔽等；
-- 对自监督任务：生成多视角、互补信息的输入，以提升表征的多样性与鲁棒性。
+- Unified backbone builder interfaces (e.g., `eval/depth/models/builder.py`, `segmentation_m2f/models/builder.py`) dynamically construct models based on configuration.
+- For different tasks (e.g., depth estimation, segmentation), similar or identical backbones can be reused to share a common representation space.
+- For time-series data, TISA provides an "image-like" perspective by treating time steps as spatial dimensions to leverage mature vision backbones.
 
-通过统一的增强接口，可以：
+### 2. Task Heads and Decoding Modules
 
-- 方便地在训练/评估阶段切换或堆叠不同增强策略；
-- 针对不同行业场景（如设备振动监测、过程控制）调节增强强度与类型；
-- 兼容后续加入的新模态数据（如声学、图像序列等）。
+Directories such as `eval/depth/decode_heads/`, `eval/segmentation/decode_heads/`, and `segmentation_m2f/models/decode_heads/` contain various decoding and task heads:
 
-### 2. 可视化与热力图
-
-- `batch_generate_heatmaps.py`：批量生成热力图，用于展示模型在时序或图像输入上的注意区域；
-- `src/visualize.py`：提供通用可视化工具，将特征图、预测结果与原始数据对齐；
-- `src/ui_idap_v1.py`：基于图形界面封装交互流程，便于进行参数调整、数据浏览与结果对比。
-
-对时序任务而言，热力图可展示：
-
-- 哪些时间片段对分类/回归结果贡献最大；
-- 在多通道场景下，不同通道的重要性分布；
-- 数据异常、漂移或故障发生的时间窗口。
-
-对图像任务而言，热力图可展示：
-
-- 模型对目标区域、背景区域的不同关注程度；
-- 可能存在的偏置或误判模式；
-- 不同增强策略对注意分布的影响。
+- For regression tasks (e.g., depth estimation, soft sensing), continuous-value prediction heads output pixel-level or sequence-level scalars.
+- For segmentation and detection tasks, structured output modules such as masks and bounding boxes are introduced (e.g., `segmentation_m2f/core/anchor`, `segmentation_m2f/core/box`).
+- Along the time dimension, these can be analogized to the pixel dimension so that each time step or time window receives a label or weight, enabling unified time–space prediction structures.
 
 ---
 
-## 六、工业与少样本场景示例
+## 4. Evaluation Protocols and Model Ensembling 📊
 
-### 1. 故障诊断与软测量
+### 1. Basic Evaluation Scripts
 
-`data/fault_diagnosis.npy` 与 `data/soft_sensor.npy` 的存在表明，TISA 针对以下典型工业任务进行了适配：
+The `eval/` and `run/eval/` directories contain several scripts for feature evaluation and downstream training:
 
-- 故障诊断：利用设备传感器时序信号（如温度、振动、电流等），通过分类或异常检测捕捉故障模式；
-- 软测量：在仅能实时采集部分变量的情况下，利用模型预测难以直接测量的过程指标或产品质量。
+- `eval/knn.py`, `run/eval/knn.py`: k-NN-based feature quality evaluation for both time-series and image features.
+- `eval/linear.py`, `run/eval/linear.py`: linear probing to assess the linear separability of frozen features.
+- `eval/log_regression.py`, `run/eval/log_regression.py`: logistic regression evaluation for binary or multi-class classification.
+- `eval/metrics.py`, `spot-diff-main/utils/metrics.py`: unified implementations of common metrics such as accuracy, recall, and AUC.
 
-在这两类任务中，TISA 通过：
+These evaluation scripts can be run on:
 
-- 自监督预训练 + 下游微调的方式，减少对大规模标注数据的依赖；
-- 多时间尺度增强（短窗口与长窗口组合）提升对缓慢变化和瞬时冲击的同时感知能力；
-- 结合图像视角，将时序转化为时频图、时-通道矩阵等形式，引入视觉模型的表达能力。
+- Features extracted purely from time-series inputs (e.g., sensor signals in `data/fault_diagnosis.npy`).
+- Features extracted purely from image inputs (e.g., "image-like" feature maps converted from time-series).
+- Or fused multimodal features for joint evaluation.
 
-### 2. 少样本学习与差异分析
+### 2. Model Ensembling and Hyperparameter Optimization
 
-`spot-diff-main/` 目录下的 `split_csv/1cls.csv`, `2cls_fewshot.csv`, `2cls_highshot.csv` 和 `utils/prepare_data.py` 表明，该仓库支持少样本和多样本场景的数据划分与加载：
+- `ensemble_models.py`: combines predictions from multiple models or training runs via weighting or rule-based fusion to improve stability and accuracy.
+- `optimize_knn.py`: searches hyperparameters such as k values and distance metrics to optimize nearest-neighbor classification in feature space.
 
-- Few-shot：在极少标注样本下评估模型的快速适应能力；
-- High-shot：在充足标注下评估模型的上限性能；
-- 单类/多类划分：用于异常检测或一类分类等场景。
-
-通过在统一的 TISA 特征空间上对比 few-shot 与 high-shot 的结果，可以：
-
-- 分析自监督特征对标注效率的提升；
-- 评估特征在小样本场景下的稳定性；
-- 指导数据采集与标注策略优化。
+For time-series tasks, you can train multiple models at different temporal granularities and window lengths; for image tasks, you can train models with different input sizes and view transformations, then use the above scripts for post-processing and ensembling.
 
 ---
 
-## 七、工程化与实用工具
+## 5. Data Augmentation and Visualization 🌈
 
-### 1. 配置与工具库
+### 1. Time-series and Image Augmentation
 
-- `utils/config.py`：集中管理配置解析与合并逻辑，实现命令行参数与 YAML 文件的统一整合；
-- `utils/cluster.py`：提供聚类相关工具，可用于对时序段或图像特征进行聚类分析，辅助无监督模式发现；
-- `utils/utils.py`：封装日志、随机种子控制、分布式训练辅助等通用函数。
+`src/augmentation.py` and `src/idaly/augmentation.py` (the latter inferred to be a submodule for augmentation) provide various data augmentation operations:
 
-### 2. 脚本与自动化
+- For time-series signals: random cropping, scaling, noise injection, time jittering, channel shuffling, etc.
+- For images or time-series pseudo-images: cropping, flipping, color jittering, occlusion/masking, etc.
+- For self-supervised tasks: generating multi-view, complementary inputs to improve diversity and robustness of representations.
 
-- `scripts/lint.sh`：用于代码质量检查和风格统一；
-- `rename_files.py`：批量重命名文件，便于数据或结果整理；
-- `process_all_categories.py`：对多类别数据集进行统一处理与预处理。
+Through a unified augmentation interface, you can:
 
-这些脚本与工具有助于：
+- Easily switch or stack different augmentation strategies during training and evaluation.
+- Adjust augmentation strength and types for different industrial scenarios (e.g., vibration monitoring, process control).
+- Remain compatible with future modalities (e.g., acoustic signals, image sequences).
 
-- 保持实验记录的一致性与可重复性；
-- 简化多数据集、多任务场景下的数据准备与结果管理；
-- 为后续工程部署（如服务化、嵌入式部署）奠定基础。
+### 2. Visualization and Heatmaps
 
----
+- `batch_generate_heatmaps.py`: batch-generates heatmaps to visualize model attention on time-series or image inputs.
+- `src/visualize.py`: general visualization utilities to align feature maps, predictions, and raw data.
+- `src/ui_idap_v1.py`: a GUI wrapper for interactive workflows such as parameter tuning, data browsing, and result comparison.
 
-## 八、典型使用流程示意
+For time-series tasks, heatmaps can show:
 
-基于仓库结构，可以构造如下面向时序与图像的典型使用路径（示意性说明）：
+- Which time windows contribute most to classification or regression outputs.
+- The importance distribution across channels in multichannel scenarios.
+- Time windows where anomalies, drifts, or faults occur.
 
-1. **数据准备**：
-   - 将原始时序文件整理为 `.npy` 或类似格式，放入 `data/` 目录；
-   - 如需图像任务，将时序转换为时频图、二维矩阵或直接使用图像数据；
-   - 使用 `spot-diff-main/split_csv/` 中的划分文件或自定义划分策略。  
+For image tasks, heatmaps can show:
 
-2. **配置设定**：
-   - 在 `configs/train/` 与 `configs/eval/` 中选择或编写配置；
-   - 根据任务类型（时序 / 图像 / 混合）调整模型规模、输入尺寸与增强策略；
-   - 如需自监督预训练，参考 `ssl_default_config.yaml` 和 `train/ssl_meta_arch.py`。  
-
-3. **模型训练**：
-   - 使用根目录下的 `train.py` 或 `run/train/train.py` 启动训练；
-   - 结合 `utils/` 中的工具进行日志记录、模型保存与加载；
-   - 如有必要，配合 `train/` 下其他脚本实现特定训练策略。  
-
-4. **特征评估与下游任务**：
-   - 采用 `eval/knn.py`, `eval/linear.py`, `eval/log_regression.py` 等脚本评估特征质量；
-   - 在 `run/eval/` 中使用封装入口进行批量评估；
-   - 对于深度估计或分割类任务，参考 `eval/depth/` 与 `eval/segmentation/` 相关模型与头。  
-
-5. **结果可视化与分析**：
-   - 使用 `batch_generate_heatmaps.py` 生成时序/图像热力图，观察模型关注区域；
-   - 借助 `src/visualize.py` 与 `src/ui_idap_v1.py` 进行结果展示与交互；
-   - 通过 `ensemble_models.py` 与 `optimize_knn.py` 对结果进行进一步优化与对比。  
-
-6. **工业落地与迭代**：
-   - 在故障诊断、软测量等场景中，将 TISA 训练好的模型集成至业务系统；
-   - 使用 `utils/cluster.py` 和指标脚本持续监控数据分布与模型性能；
-   - 针对新设备、新工况或新图像模态，继续利用自监督与小样本策略进行快速适配。
+- Different levels of attention on target regions vs. background.
+- Potential bias or misprediction patterns.
+- The impact of different augmentation strategies on attention distribution.
 
 ---
 
-## 九、总结
+## 6. Industrial and Few-shot Scenarios 🏭
 
-TISA 算法围绕「统一处理时序数据和图像数据」这一目标展开设计，通过：
+### 1. Fault Diagnosis and Soft Sensing
 
-- 自监督预训练 + 多任务头结构，提高特征的通用性与可迁移性；
-- 丰富的数据增强与可视化工具，支持对模型行为的解释与调试；
-- 多种评估协议与少样本场景支持，系统性刻画模型在复杂工业环境下的表现；
+The presence of `data/fault_diagnosis.npy` and `data/soft_sensor.npy` indicates that TISA is tailored to the following typical industrial tasks:
+
+- Fault diagnosis: use time-series signals from industrial sensors (e.g., temperature, vibration, current) for classification or anomaly detection of fault patterns.
+- Soft sensing: when only partial variables are measured online, use models to predict hard-to-measure process indicators or product quality.
+
+In these two scenarios, TISA:
+
+- Reduces dependence on large labeled datasets via self-supervised pretraining followed by downstream fine-tuning.
+- Enhances sensitivity to both slow trends and abrupt shocks with multi-timescale augmentation (combining short and long windows).
+- Leverages an image perspective by transforming time-series into time–frequency or time–channel matrices to exploit visual models.
+
+### 2. Few-shot Learning and Difference Analysis
+
+The files `spot-diff-main/split_csv/1cls.csv`, `2cls_fewshot.csv`, `2cls_highshot.csv` and `spot-diff-main/utils/prepare_data.py` show that the repository supports data partitioning and loading for few-shot and many-shot settings:
+
+- Few-shot: evaluate how quickly models adapt with very few labeled samples.
+- High-shot: evaluate upper-bound performance with abundant labels.
+- Single-/multi-class splits: for anomaly detection or one-class classification scenarios.
+
+By comparing few-shot vs. high-shot results within a unified TISA representation space, you can:
+
+- Analyze how self-supervised features improve label efficiency.
+- Assess feature stability in small-sample regimes.
+- Guide strategies for data collection and labeling.
+
+---
+
+## 7. Engineering and Utility Tools 🛠️
+
+### 1. Configuration and Utility Library
+
+- `utils/config.py`: centralized management of configuration parsing and merging, unifying command-line arguments and YAML files.
+- `utils/cluster.py`: clustering utilities for time-series segments or image features, useful for unsupervised pattern discovery.
+- `utils/utils.py`: common utilities for logging, random seed control, distributed training helpers, etc.
+
+### 2. Scripts and Automation
+
+- `scripts/lint.sh`: code quality and style checking.
+- `rename_files.py`: batch file renaming for easier organization of data and results.
+- `process_all_categories.py`: unified preprocessing for multi-category datasets.
+
+These scripts and tools help to:
+
+- Maintain consistency and reproducibility of experiments.
+- Simplify data preparation and result management in multi-dataset, multi-task scenarios.
+- Lay foundations for further engineering deployment (e.g., services, embedded systems).
+
+---
+
+## 8. Typical Usage Workflow 🚀
+
+Based on the repository structure, a typical workflow for time-series and image tasks can be outlined as follows (schematic only):
+
+1. **Data preparation**:
+   - Organize raw time-series files into `.npy` or similar formats and place them in the `data/` directory.
+   - For image tasks, convert time-series into time–frequency maps, 2D matrices, or directly use image data.
+   - Use the splits in `spot-diff-main/split_csv/` or define custom partition strategies.  
+
+2. **Configuration**:
+   - Select or create configurations under `configs/train/` and `configs/eval/`.
+   - Adjust model size, input resolution, and augmentation strategies according to task type (time-series / image / hybrid).
+   - For self-supervised pretraining, refer to `ssl_default_config.yaml` and `train/ssl_meta_arch.py`.  
+
+3. **Model training**:
+   - Launch training with `train.py` in the repository root or `run/train/train.py`.
+   - Use utilities in `utils/` for logging, checkpoint saving, and loading.
+   - If needed, combine with other scripts under `train/` to implement specific training strategies.  
+
+4. **Feature evaluation and downstream tasks**:
+   - Use `eval/knn.py`, `eval/linear.py`, `eval/log_regression.py` to evaluate feature quality.
+   - Use the wrapped entry points under `run/eval/` for batched evaluations.
+   - For depth estimation or segmentation tasks, refer to the models and heads in `eval/depth/` and `eval/segmentation/`.  
+
+5. **Visualization and analysis**:
+   - Use `batch_generate_heatmaps.py` to generate time-series / image heatmaps and inspect model attention.
+   - Use `src/visualize.py` and `src/ui_idap_v1.py` for result visualization and interaction.
+   - Further optimize and compare results with `ensemble_models.py` and `optimize_knn.py`.  
+
+6. **Industrial deployment and iteration**:
+   - Integrate TISA-trained models into production systems for fault diagnosis, soft sensing, etc.
+   - Use `utils/cluster.py` and metric scripts to continuously monitor data distribution and model performance.
+   - For new devices, operating conditions, or image modalities, continue to leverage self-supervision and few-shot strategies for rapid adaptation.
+
+---
+
+## 9. Summary 📌
+
+The TISA algorithm is designed around the goal of "unified handling of time-series and image data" by:
+
+- Combining self-supervised pretraining with multi-task heads to improve feature generality and transferability.
+- Providing rich data augmentation and visualization tools to support interpretation and debugging of model behavior.
+- Supporting multiple evaluation protocols and few-shot scenarios to systematically characterize model performance in complex industrial environments.
